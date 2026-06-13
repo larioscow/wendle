@@ -1,21 +1,12 @@
 # wendle
 
-Drive the whole Android phone from Python. Walk a path through the device once by hand;
-wendle records it as a navigable map, replays it on the device, routes back to any screen
-it has seen, and runs your own code in the gaps between replayed steps.
-
-wendle treats the whole phone as one state machine, not a single app. A *node* is any state
-the device can be in — the lock screen, the launcher, the notification shade, quick
-settings, Settings, an app, a browser. An *edge* is a transition you performed while
-recording. A recorded workflow can therefore cross between apps and system surfaces: open
-Settings, read a value, go to the launcher, open another app, and type it in.
-
-It works black-box over ADB and `uiautomator2`: no app source, no instrumentation inside
-the apps you drive, no root. Elements are matched by content-desc, text, or resource-id,
-and fall back to raw coordinates only when nothing stable is available.
-
-It is honesty-first. When wendle cannot confirm where it landed, it stops and reports the
-step and element it stopped on, rather than continuing to a screen it has not verified.
+wendle is a Python framework for black-box Android UI automation, built on ADB and
+`uiautomator2`. It records a manual walkthrough of a device into a directed graph of
+screens that spans multiple apps and system surfaces (Settings, the launcher, the
+notification shade), not a single app, then replays that recording and navigates between
+any two screens on the graph. Arrivals are verified by screen fingerprint; on a mismatch
+it stops and reports rather than guessing. Hooks can run arbitrary code (Frida, an LLM,
+plain Python) between replayed steps.
 
 ## Install
 
