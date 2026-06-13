@@ -1,0 +1,16 @@
+add device 1: /dev/input/event0
+  name:     "mtk-kpd"
+  events:
+    KEY (0001): 0072  0073
+add device 2: /dev/input/event5
+  name:     "fts_ts"
+  events:
+    ABS (0003):
+      ABS_MT_TOUCH_MAJOR    : value 0, min 0, max 100, fuzz 0, flat 0, resolution 0
+      ABS_MT_POSITION_X     : value 0, min 0, max 1220, fuzz 0, flat 0, resolution 0
+      ABS_MT_POSITION_Y     : value 0, min 0, max 2712, fuzz 0, flat 0, resolution 0
+add device 3: /dev/input/event7
+  name:     "hall-sensor"
+  events:
+    ABS (0003):
+      ABS_DISTANCE          : value 0, min 0, max 1, fuzz 0, flat 0, resolution 0

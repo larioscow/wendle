@@ -1,0 +1,13 @@
+add device 1: /dev/input/event0
+  name:     "gpio-keys"
+  events:
+    KEY (0001): 0072  0073  0074
+add device 2: /dev/input/event3
+  name:     "ft5x46_ts"
+  events:
+    ABS (0003):
+      ABS_MT_SLOT           : value 0, min 0, max 9, fuzz 0, flat 0, resolution 0
+      ABS_MT_TOUCH_MAJOR    : value 0, min 0, max 255, fuzz 0, flat 0, resolution 0
+      ABS_MT_POSITION_X     : value 0, min 0, max 1080, fuzz 0, flat 0, resolution 0
+      ABS_MT_POSITION_Y     : value 0, min 0, max 2340, fuzz 0, flat 0, resolution 0
+      ABS_MT_TRACKING_ID    : value 0, min 0, max 65535, fuzz 0, flat 0, resolution 0

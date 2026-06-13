@@ -1,0 +1,7 @@
+[   86753.123456] /dev/input/event3: EV_ABS       ABS_MT_TRACKING_ID   00000042
+[   86753.123456] /dev/input/event3: EV_ABS       ABS_MT_POSITION_X    00000087
+[   86753.123456] /dev/input/event3: EV_ABS       ABS_MT_POSITION_Y    00000abc
+[   86753.123456] /dev/input/event3: EV_KEY       BTN_TOUCH            DOWN
+[   86753.123456] /dev/input/event3: EV_SYN       SYN_REPORT           00000000
+[   86753.245678] /dev/input/event3: EV_KEY       BTN_TOUCH            UP
+[   86753.245678] /dev/input/event3: EV_SYN       SYN_REPORT           00000000

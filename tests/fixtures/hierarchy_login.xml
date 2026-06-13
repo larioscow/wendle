@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<hierarchy rotation="0">
+  <node class="android.widget.FrameLayout" resource-id="" text="" content-desc="" clickable="false" password="false" bounds="[0,0][1080,2340]">
+    <node class="android.widget.EditText" resource-id="com.app:id/username" text="" content-desc="Username" clickable="true" password="false" bounds="[40,500][1040,620]"/>
+    <node class="android.widget.EditText" resource-id="com.app:id/password" text="" content-desc="" clickable="true" password="true" bounds="[40,700][1040,820]"/>
+    <node class="android.widget.Button" resource-id="com.app:id/login" text="Log in" content-desc="" clickable="true" password="false" bounds="[40,900][1040,1020]"/>
+    <node class="androidx.compose.ui.platform.ComposeView" resource-id="" text="" content-desc="" clickable="true" password="false" bounds="[40,1100][1040,1220]"/>
+  </node>
+</hierarchy>

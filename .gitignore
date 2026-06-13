@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+device_profile.json
+corpus/
+
+
+# on-device recordings (PII)
+out/
+
+# macOS
+.DS_Store
+
+# on-device recordings + probe/validation outputs (PII; these live at the repo root)
+/*.json
+/*.json.ndjson
+!/pyproject.json
+
+# local tooling state (machine-local; not part of the project)
+.claude/
+.desloppify/

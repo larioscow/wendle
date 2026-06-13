@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wendle"
+version = "0.1.0"
+description = "Hookable, deterministic, honesty-first automation framework for any Android app — record/replay/navigate a verified screen graph and inject Frida/AI hooks between steps"
+requires-python = ">=3.9"
+dependencies = [
+    "defusedxml>=0.7.1",
+    "networkx>=3.2,<3.3",
+    "uiautomator2>=3.5,<4",
+]
+
+[project.scripts]
+wendle = "wendle.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["wendle"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# repo root on sys.path so device-free tests can import demo/probe code under scripts/
+# (scripts is not an installed package; this keeps hook demos like frida_probe testable).
+pythonpath = ["."]
