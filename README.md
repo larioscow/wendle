@@ -1,31 +1,21 @@
 # wendle
 
-Drive any Android app from Python. You walk through the app once by hand;
-wendle records that walkthrough, replays it on the device, and lets you
-navigate back to any screen it has seen.
+Drive the whole Android phone from Python. Walk a path through the device once by hand;
+wendle records it as a navigable map, replays it on the device, routes back to any screen
+it has seen, and runs your own code in the gaps between replayed steps.
 
-It works black-box over ADB and uiautomator2, so it needs no app source and
-doesn't instrument the target. Elements are matched by content-desc, text, or
-resource-id, and it only falls back to raw coordinates when nothing stable is
-available.
+wendle treats the whole phone as one state machine, not a single app. A *node* is any state
+the device can be in — the lock screen, the launcher, the notification shade, quick
+settings, Settings, an app, a browser. An *edge* is a transition you performed while
+recording. A recorded workflow can therefore cross between apps and system surfaces: open
+Settings, read a value, go to the launcher, open another app, and type it in.
 
-The reason to record a walkthrough instead of writing a script is that you can
-splice your own code into the gaps between steps. A hook can run a Frida read,
-call an LLM, or run plain Python, look at the live state, and decide what
-happens next: keep going, stop, or reroute to a different screen. The recorded
-path stays fixed and deterministic; you only hand control to your own logic at
-the points you choose.
+It works black-box over ADB and `uiautomator2`: no app source, no instrumentation inside
+the apps you drive, no root. Elements are matched by content-desc, text, or resource-id,
+and fall back to raw coordinates only when nothing stable is available.
 
-When wendle can't confirm where it landed, it stops and tells you which step
-and element it got stuck on, with a typed status. It won't report a success it
-didn't verify.
-
-### Why not just point an LLM agent at the app?
-
-An LLM agent re-decides every action on every run and can confidently tap the
-wrong thing. With wendle the path is recorded and checked up front, and the LLM
-is one hook at a known point that reads state and reroutes, rather than the
-thing driving every tap.
+It is honesty-first. When wendle cannot confirm where it landed, it stops and reports the
+step and element it stopped on, rather than continuing to a screen it has not verified.
 
 ## Install
 
@@ -33,116 +23,219 @@ thing driving every tap.
 uv sync          # or: pip install -e .
 ```
 
-You need a device reachable over `adb` (USB or wireless debugging) and
-`uiautomator2`.
+You need a device reachable over `adb` (USB or wireless debugging). `uiautomator2` is
+imported lazily, only when you construct a real driver, so tests and offline tooling need
+no device.
 
 ## Quickstart
 
 ```python
 import wendle
 
-# Record: walk the app by hand for 90 seconds. Returns a navigable map and
-# saves it. Connects to the device and calibrates on its own.
-graph = wendle.record(duration=90, out="myapp.json")
+# RECORD — walk the device by hand for 90s. Returns a navigable map and saves it.
+# Connects to the device and calibrates touch input on its own.
+graph = wendle.record(duration=90, out="phone.json")
 
-# Replay: re-run the recorded walk on the device.
-result = wendle.replay("myapp.json", wendle.U2Driver())
-print(result.status)          # COMPLETED, or a typed stop if a step couldn't be verified
-print(result.stop_reason)     # the StopReason on a stop
+# REPLAY — re-enact the recorded walk on the device.
+result = wendle.replay("phone.json", wendle.U2Driver())
+print(result.status)        # COMPLETED, or STOPPED (with a typed reason) if a step failed to verify
 
-# Navigate: route to any node in the map and confirm arrival.
+# NAVIGATE — route to any node in the map and confirm arrival.
 outcome = wendle.navigate(graph, graph.anchors()[0], target_id, wendle.U2Driver())
-print(outcome.status)         # ARRIVED, ARRIVED_UNVERIFIED, OFF_GRAPH, ...
+print(outcome.status)       # ARRIVED, ARRIVED_UNVERIFIED, OFF_GRAPH, ...
 ```
 
-Pass a serial with `wendle.U2Driver(serial)`, or set `ANDROID_SERIAL`. For
-tests without a phone, use `wendle.FakeDriver`. Render the map with
-`wendle.render(graph, "map.dot")`.
+Pass a serial with `wendle.U2Driver("RF8…")`, or set `ANDROID_SERIAL`. For tests without a
+phone, use `wendle.FakeDriver`. Render the map with `wendle.render(graph, "map.dot")`.
 
-## CLI
+## The whole phone is the map
 
-The same verbs are available as a command (`uv run wendle ...`, or just
-`wendle` once installed):
+Because the map models the device rather than one app, you address screens by node id
+regardless of which app or surface they belong to. To reach a target, the navigator:
 
-```bash
-wendle record --out myapp.json --duration 90      # walk the app by hand; save the map
-wendle replay myapp.json --param password=…       # re-enact it (credentials never logged)
-wendle replay myapp.json --hooks my_hooks.py      # inject a HookRegistry between steps
-wendle nodes myapp.json                           # list node ids (verified anchors marked)
-wendle navigate myapp.json --to <node-id>         # route to a node and verify arrival
-wendle render myapp.json -o myapp.dot             # offline, redaction-safe DOT map
+1. finds the nearest **anchor** — a node with a verified way to be forced into existence
+   (an app's launcher entry, or a system keyevent such as HOME, back, or recents);
+2. forces that anchor, then verifies its fingerprint before trusting it;
+3. computes a weighted shortest path to the target over the recorded graph (so it prefers
+   reliable routes over fewest hops) and walks it, re-observing and re-planning at each
+   step.
+
+Cross-app edges — a share sheet, an OAuth handoff, an OEM intent — are kept in the graph as
+re-anchor checkpoints: when a route leaves one app for another, the navigator re-roots at
+the destination app's anchor and continues. How to launch an app is decided by a ladder:
+recorded component, then recorded launcher-icon tap, then package default, then monkey
+launcher. The icon-tap rung is what reaches entries that share a process with another app
+(for example an assistant inside the system Google app), where `am start` cannot.
+
+```python
+# Cross surfaces in one workflow: read a value in Settings, act on it in another app.
+graph = wendle.Graph.from_json(open("phone.json").read())
+driver = wendle.U2Driver()
+
+# Each target is a node id; the navigator launches and routes to whichever app owns it.
+wendle.navigate(graph, start, settings_node, driver)            # into a system surface
+value = read_something(driver)                                  # your code, off the live screen
+wendle.navigate(graph, settings_node, other_app_node, driver)   # across the app boundary
 ```
 
-Exit codes:
-
-```
-0   verified success
-3   stopped or refused (stopped / arrived_unverified / off_graph / ...)
-2   usage error
-1   crash
-```
-
-A refusal (`3`) is kept separate from a crash (`1`) so a script can tell
-"wendle wouldn't guess" apart from "wendle broke".
+System surfaces (launcher, shade, quick settings) are reached by their keyevent anchors, so
+a route can pass through them and not only through apps.
 
 ## Hooks
 
-A hook runs between two replay steps, keyed by step index or by the screen
-wendle observes. It reaches the device only through `ctx` and returns one of
-`cont()`, `stop()`, or `goto(node)`:
+A hook runs between two replay steps, keyed by step index or by the screen wendle observes.
+It reaches the device only through `ctx`, and returns a directive that decides what happens
+next:
 
 ```python
-from wendle.replay import HookRegistry, cont, stop, goto
+from wendle.replay.hooks import HookRegistry, cont, stop, goto
 
 hooks = HookRegistry()
 
-@hooks.after(2)                          # runs after recorded step 2
-def decide(ctx):
-    state = read_runtime_state(ctx)      # a Frida read, an AI-agent call, whatever you need
-    if state.blocked:
-        return stop("policy_blocked")    # halt instead of barrelling on
-    if state.needs_detour:
-        return goto(some_node_id)        # navigator pathfinds and verifies the reroute
-    return cont()
+@hooks.after(2)                          # fires after recorded step 2 has verified
+def inspect(ctx):
+    # ctx.driver is the device seam; ctx.node_id is the verified map node we are on
+    # (None when the landing was ambiguous, so check it).
+    reading = read_live_state(ctx)       # a Frida read, an LLM call, or plain Python
+    ctx.emit("native_modules", reading.count)   # record a value-free fact on the result
 
-wendle.replay("myapp.json", wendle.U2Driver(), hooks=hooks)
+    if reading.blocked:
+        return stop("policy_blocked")    # halt instead of continuing
+    if reading.needs_detour:
+        return goto(other_node_id)       # reroute; the navigator pathfinds and verifies it
+    return cont()                        # continue the recorded path (None also means cont)
+
+wendle.replay("phone.json", wendle.U2Driver(), hooks=hooks)
 ```
 
-`goto()` goes through the navigator: it pathfinds to the target node and checks
-it actually arrived, returning a typed stop on an ambiguous landing instead of
-claiming success. `scripts/demo_hook_frida.py` is a working on-device Frida
-hook between two recorded steps.
+- `@hooks.before(n)` and `@hooks.after(n)` fire immediately before and after a step;
+  `@hooks.screen("pkg/.Activity")` fires once each time replay arrives at that screen.
+- `cont()` continues the recorded path. `stop(reason)` halts with a value-free label; the
+  framework will not continue past it. `goto(node)` hands control to the navigator, which
+  pathfinds to the target and confirms arrival, returning a typed stop on an ambiguous
+  landing rather than a claimed success.
+- A hook reaches the device only through `ctx.driver` and steers only through its return
+  value. Step indices always refer to the original recording, even after a `goto`, and a
+  per-run budget bounds reroute loops.
 
-## Return values
+`scripts/demo_hook_frida.py` is a working on-device Frida hook between two replay steps.
+`examples/settings_assistant.py` routes a system map by node and steers a hooked replay
+with `goto`, live reads, and a `stop`.
 
-`replay` and `navigate` return typed results. Branch on the constants, not on
-strings:
+### Why not point an LLM agent at the app instead
 
-- `ReplayStatus` (`COMPLETED` / `STOPPED`), with a typed `StopReason` on a stop.
-- `NavStatus` (`ARRIVED` / `ARRIVED_UNVERIFIED` / `OFF_GRAPH` / `FORCE_FAILED` / ...).
+An LLM agent re-decides every action on every run and can confidently tap the wrong thing.
+With wendle the path is recorded and verified up front, and the agent is one hook at a known
+point that reads state and reroutes, rather than the thing driving every tap.
 
-The `repr` of a result never includes a selector value or a typed secret. A
-password field shows up in the UI dump as plain text; the recorder replaces it
-with a `{param}` handle and never stores the value.
+## Outcomes
 
-## What's hard about this
+`replay` and `navigate` return typed results. Branch on the constants, not on strings.
 
-Running code between steps is the easy part — LangGraph-style interrupt/goto
-already does that in the abstract. The work in wendle is the Android side that
-makes those steps land somewhere real on an app you don't control: replaying a
-recording faithfully, recognising a screen you've seen before (including two
-pages built from the same layout), confirming you actually arrived, launching
-apps that share a process, and keeping secrets out of the recording.
+- `ReplayStatus` is `COMPLETED` or `STOPPED`, with a typed `StopReason` on a stop
+  (`ELEMENT_NOT_PRESENT`, `AMBIGUOUS_MATCH`, `CREDENTIAL_REQUIRED`, `HOOK_STOP`,
+  `GOTO_FAILED`, and others).
+- `NavStatus` is one of `ARRIVED` (confirmed), `ARRIVED_UNVERIFIED` (plausibly there but
+  unconfirmable — the caller decides), `OFF_GRAPH`, `CONTENT_DRIFT`, `CROSS_APP_BOUNDARY`,
+  `FORCE_FAILED`, `NO_ROUTE`, `COORDINATE_ONLY_REFUSED`, or `CREDENTIAL_REQUIRED`.
 
-## Scope
+A text-free structural match is reported as `ARRIVED` only when corroborated by a verified
+interaction in the same call (a gated launch or a walked recorded edge). Without that
+corroboration it could be an unrecorded look-alike screen (Inbox versus Archive), so it
+degrades to `ARRIVED_UNVERIFIED`. A result's `repr` never contains a selector value or a
+secret.
 
-v1, this repo: record, replay, navigate, and the inter-step hooks. v2, not
-built yet: crawling an app to build the map without a manual walk, and
-generating a reusable navigation module from a recording. The design spec is in
-[`docs/design/wendle-design-spec.md`](docs/design/wendle-design-spec.md).
+## CLI
+
+The same verbs are available as a command (`uv run wendle …`, or `wendle` once installed):
+
+```bash
+wendle record --out phone.json --duration 90   # walk the device by hand; save the map
+wendle replay phone.json --param password=…     # re-enact it (credentials never logged)
+wendle replay phone.json --hooks my_hooks.py    # inject a HookRegistry between steps
+wendle nodes phone.json                         # list node ids (verified anchors marked)
+wendle navigate phone.json --to <node-id>       # route to a node and verify arrival
+wendle render phone.json --target dot           # offline, redaction-safe map (dot/flow/maestro/python)
+```
+
+Exit codes carry the result into the shell:
+
+```
+0   verified success        (replay completed / navigate arrived)
+1   crash                   (an uncaught exception)
+2   usage error             (bad flags, missing file, unknown node)
+3   honest stop / refusal   (stopped / arrived_unverified / off_graph / ...)
+```
+
+`3` is separate from `1` so a script can tell a refusal to guess apart from a failure.
+
+## How it works
+
+- **Capture.** A manual recorder watches you drive the device. Scaled `getevent` is the
+  primary signal — it reports that a physical tap happened and where, on every screen — and
+  each tap binds to the settled hierarchy snapshot that was on screen at tap time via a
+  timestamped ring buffer. Typed text becomes a `set_text` action, with password fields
+  reduced to a `{param}` handle at capture, before the literal leaves the buffer.
+- **Fingerprint.** Each screen gets a structural signature: a hashed tree of
+  `(class, resource-id, clickable, content-desc shape)` with list children collapsed and
+  volatile subtrees (clock, battery, badges) stripped, namespaced by foreground package and
+  window. A separate text-free `structure_id` drives a graded match tier (EXACT, STRUCTURE,
+  WEAK, UNVERIFIABLE) used to decide how confident an arrival is.
+- **Graph.** A `networkx` `MultiDiGraph`, persisted to JSON as structure only — no
+  callables, no secret literals. Routing is a weighted shortest path from the nearest
+  forceable anchor.
+- **Replay and verify.** A launch step plus a wait-then-verify loop with a tolerance band
+  absorbs A/B and loading-screen variation without false aborts, and stops with a report
+  when it lands off-graph.
+
+## Prior art
+
+wendle takes several pieces from existing tools:
+
+- The launch and per-command wait-then-verify model is from Maestro's flow runner;
+  `wendle render --target maestro` emits a Maestro flow.
+- Re-observing and re-planning at each navigation step, and restarting at an anchor to
+  recover, follow DroidBot's UI Transition Graph.
+- The hashed structural-signature approach to fingerprinting is from APE and Fastbot.
+- `set_checked` (read, modify, verify; flip only on a mismatch) follows Playwright's
+  `setChecked` and the Appium check-then-click idiom.
+- Attaching hooks to graph nodes by reference, rather than serializing them, mirrors
+  LangGraph's `add_node(name, callable)`.
+
+## Scope and limits
+
+v1, in this repo: the manual recorder, deterministic replay, graph navigation, and the
+inter-step hooks. Record, replay, and navigate are validated on a Galaxy S23, including
+launching arbitrary apps (tested across 50), launching entries that share a process,
+passing through system surfaces, and telling structural twins apart.
+
+Limits:
+
+- **Device-scoped, not fleet-portable.** A recording is bound to one device's calibration,
+  resolution, and OS build. Semantic selector edges port across devices; structural
+  fingerprints, coordinate-only edges, and force actions do not. One graph across a fleet
+  is a v2 design (a logical graph plus a per-device overlay).
+- **Multi-app handoff within a single recorded run** is not yet proven end-to-end on a
+  device. The data model, routing, and per-app launch support it, but a live A→B→C handoff
+  in one run has not been validated.
+- **Compose, coordinate-only, and WebView.** testTag-less single-Activity Compose is the
+  limit of structural fingerprinting; screens with no stable selector replay through flagged
+  raw coordinates; WebView is low-confidence. Flutter and games are out of scope (no usable
+  accessibility tree).
+- **Maintenance is reduced, not removed.** An app UI change invalidates the affected
+  screens' fingerprints, which then need re-recording. Re-recording a changed flow is
+  usually cheaper than re-authoring the equivalent selector code.
+
+Not built (planned for v2): crawling an app to build the map without a manual walk, and a
+live observability dashboard.
 
 ## Development
 
 ```bash
-uv run python -m pytest -q     # tests run against FakeDriver, no phone needed
+uv run python -m pytest -q     # 844 tests against FakeDriver — no phone needed
 ```
+
+The device sits behind a `DeviceDriver` port, so fingerprinting, gesture segmentation, and
+the selector ladder are pure functions over driver output (XML in, hash out) and run in CI
+against recorded-hierarchy fixtures, including adversarial ones (truncated trees, empty
+dumps).
