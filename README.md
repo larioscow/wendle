@@ -8,31 +8,30 @@ any two screens on the graph. Arrivals are verified by screen fingerprint; on a 
 it stops and reports rather than guessing. Hooks can run arbitrary code (Frida, an LLM,
 plain Python) between replayed steps.
 
-## The loop
+## CLI
 
 Everything runs from the command line against one `phone.json`. You don't write Python until
 you want custom logic.
 
 ```bash
-# Walk the app by hand once; save the map.
-wendle record --out phone.json --duration 90
-
-# List the screens it captured, by id and namespace.
-wendle nodes phone.json
-
-# Re-enact the walk, or route straight to one screen and verify arrival.
-wendle replay phone.json
-wendle navigate phone.json --to <node-id>
-
-# Generate an editable Python driver: named go_to_<screen>() helpers, the map wired in,
-# a runnable __main__. Edit this when you want to drive the app your own way.
-wendle render phone.json --target python -o drive.py
-python drive.py
+wendle record --out phone.json --duration 90   # walk the device by hand; save the map
+wendle replay phone.json --param password=…     # re-enact it (credentials never logged)
+wendle replay phone.json --hooks my_hooks.py    # inject a HookRegistry between steps
+wendle nodes phone.json                         # list node ids (verified anchors marked)
+wendle navigate phone.json --to <node-id>       # route to a node and verify arrival
+wendle render phone.json --target dot           # offline, redaction-safe map (dot/flow/maestro/python)
 ```
 
-For logic that has to run mid-replay — a Frida read, an LLM call, a reroute — write a
-[hook](#hooks) and pass it in: `wendle replay phone.json --hooks my_hooks.py`. The Python API
-below covers the same verbs if you'd rather call functions.
+Exit codes carry the result into the shell:
+
+```
+0   verified success        (replay completed / navigate arrived)
+1   crash                   (an uncaught exception)
+2   usage error             (bad flags, missing file, unknown node)
+3   honest stop / refusal   (stopped / arrived_unverified / off_graph / ...)
+```
+
+`3` is separate from `1` so a script can tell a refusal to guess apart from a failure.
 
 ## Install
 
@@ -49,15 +48,15 @@ no device.
 ```python
 import wendle
 
-# RECORD — walk the device by hand for 90s. Returns a navigable map and saves it.
+# RECORD: walk the device by hand for 90s. Returns a navigable map and saves it.
 # Connects to the device and calibrates touch input on its own.
 graph = wendle.record(duration=90, out="phone.json")
 
-# REPLAY — re-enact the recorded walk on the device.
+# REPLAY: re-enact the recorded walk on the device.
 result = wendle.replay("phone.json", wendle.U2Driver())
 print(result.status)        # COMPLETED, or STOPPED (with a typed reason) if a step failed to verify
 
-# NAVIGATE — route to any node in the map and confirm arrival.
+# NAVIGATE: route to any node in the map and confirm arrival.
 outcome = wendle.navigate(graph, graph.anchors()[0], target_id, wendle.U2Driver())
 print(outcome.status)       # ARRIVED, ARRIVED_UNVERIFIED, OFF_GRAPH, ...
 ```
@@ -70,14 +69,14 @@ phone, use `wendle.FakeDriver`. Render the map with `wendle.render(graph, "map.d
 Because the map models the device rather than one app, you address screens by node id
 regardless of which app or surface they belong to. To reach a target, the navigator:
 
-1. finds the nearest **anchor** — a node with a verified way to be forced into existence
+1. finds the nearest **anchor**, a node with a verified way to be forced into existence
    (an app's launcher entry, or a system keyevent such as HOME, back, or recents);
 2. forces that anchor, then verifies its fingerprint before trusting it;
 3. computes a weighted shortest path to the target over the recorded graph (so it prefers
    reliable routes over fewest hops) and walks it, re-observing and re-planning at each
    step.
 
-Cross-app edges — a share sheet, an OAuth handoff, an OEM intent — are kept in the graph as
+Cross-app edges (a share sheet, an OAuth handoff, an OEM intent) are kept in the graph as
 re-anchor checkpoints: when a route leaves one app for another, the navigator re-roots at
 the destination app's anchor and continues. How to launch an app is decided by a ladder:
 recorded component, then recorded launcher-icon tap, then package default, then monkey
@@ -153,7 +152,7 @@ point that reads state and reroutes, rather than the thing driving every tap.
   (`ELEMENT_NOT_PRESENT`, `AMBIGUOUS_MATCH`, `CREDENTIAL_REQUIRED`, `HOOK_STOP`,
   `GOTO_FAILED`, and others).
 - `NavStatus` is one of `ARRIVED` (confirmed), `ARRIVED_UNVERIFIED` (plausibly there but
-  unconfirmable — the caller decides), `OFF_GRAPH`, `CONTENT_DRIFT`, `CROSS_APP_BOUNDARY`,
+  unconfirmable, so the caller decides), `OFF_GRAPH`, `CONTENT_DRIFT`, `CROSS_APP_BOUNDARY`,
   `FORCE_FAILED`, `NO_ROUTE`, `COORDINATE_ONLY_REFUSED`, or `CREDENTIAL_REQUIRED`.
 
 A text-free structural match is reported as `ARRIVED` only when corroborated by a verified
@@ -162,35 +161,11 @@ corroboration it could be an unrecorded look-alike screen (Inbox versus Archive)
 degrades to `ARRIVED_UNVERIFIED`. A result's `repr` never contains a selector value or a
 secret.
 
-## CLI
-
-The same verbs are available as a command (`uv run wendle …`, or `wendle` once installed):
-
-```bash
-wendle record --out phone.json --duration 90   # walk the device by hand; save the map
-wendle replay phone.json --param password=…     # re-enact it (credentials never logged)
-wendle replay phone.json --hooks my_hooks.py    # inject a HookRegistry between steps
-wendle nodes phone.json                         # list node ids (verified anchors marked)
-wendle navigate phone.json --to <node-id>       # route to a node and verify arrival
-wendle render phone.json --target dot           # offline, redaction-safe map (dot/flow/maestro/python)
-```
-
-Exit codes carry the result into the shell:
-
-```
-0   verified success        (replay completed / navigate arrived)
-1   crash                   (an uncaught exception)
-2   usage error             (bad flags, missing file, unknown node)
-3   honest stop / refusal   (stopped / arrived_unverified / off_graph / ...)
-```
-
-`3` is separate from `1` so a script can tell a refusal to guess apart from a failure.
-
 ## How it works
 
 - **Capture.** A manual recorder watches you drive the device. Scaled `getevent` is the
-  primary signal — it reports that a physical tap happened and where, on every screen — and
-  each tap binds to the settled hierarchy snapshot that was on screen at tap time via a
+  primary signal: it reports that a physical tap happened and where, on every screen. Each
+  tap binds to the settled hierarchy snapshot that was on screen at tap time via a
   timestamped ring buffer. Typed text becomes a `set_text` action, with password fields
   reduced to a `{param}` handle at capture, before the literal leaves the buffer.
 - **Fingerprint.** Each screen gets a structural signature: a hashed tree of
@@ -198,7 +173,7 @@ Exit codes carry the result into the shell:
   volatile subtrees (clock, battery, badges) stripped, namespaced by foreground package and
   window. A separate text-free `structure_id` drives a graded match tier (EXACT, STRUCTURE,
   WEAK, UNVERIFIABLE) used to decide how confident an arrival is.
-- **Graph.** A `networkx` `MultiDiGraph`, persisted to JSON as structure only — no
+- **Graph.** A `networkx` `MultiDiGraph`, persisted to JSON as structure only: no
   callables, no secret literals. Routing is a weighted shortest path from the nearest
   forceable anchor.
 - **Replay and verify.** A launch step plus a wait-then-verify loop with a tolerance band
@@ -249,7 +224,7 @@ live observability dashboard.
 ## Development
 
 ```bash
-uv run python -m pytest -q     # 844 tests against FakeDriver — no phone needed
+uv run python -m pytest -q     # 844 tests against FakeDriver, no phone needed
 ```
 
 The device sits behind a `DeviceDriver` port, so fingerprinting, gesture segmentation, and
