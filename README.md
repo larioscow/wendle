@@ -8,6 +8,37 @@ any two screens on the graph. Arrivals are verified by screen fingerprint; on a 
 it stops and reports rather than guessing. Hooks can run arbitrary code (Frida, an LLM,
 plain Python) between replayed steps.
 
+## The loop
+
+wendle is one workflow with four verbs, not four tools. You drive the whole thing from the
+command line — no Python file required until you want custom logic.
+
+```bash
+# 1. RECORD — walk the app by hand once; wendle saves a navigable map.
+wendle record --out phone.json --duration 90
+
+# 2. LOOK — list the screens it captured, by id and namespace (no grepping JSON).
+wendle nodes phone.json
+
+# 3. REPLAY / NAVIGATE — re-enact the walk, or route straight to any screen and verify arrival.
+wendle replay phone.json
+wendle navigate phone.json --to <node-id>
+
+# 4. DRIVE IT YOUR WAY — generate one editable Python file: named go_to_<screen>() helpers,
+#    the map wired in, a __main__ that runs. This is the single place you add custom logic.
+wendle render phone.json --target python -o drive.py
+python drive.py
+```
+
+You only reach for Python when step 4 isn't enough — to add a **hook** (run your own code at
+a verified point between steps: a Frida read, an LLM call, a reroute). Hooks live in one file
+and plug into the same replay you already ran: `wendle replay phone.json --hooks my_hooks.py`.
+See [Hooks](#hooks).
+
+That's the mental model: **record → look → replay/navigate → (optionally) hook.** Each verb
+reads the same `phone.json`; nothing is a separate tool. The Python API below is the same
+verbs as functions, for when you'd rather script than shell.
+
 ## Install
 
 ```bash
@@ -18,7 +49,9 @@ You need a device reachable over `adb` (USB or wireless debugging). `uiautomator
 imported lazily, only when you construct a real driver, so tests and offline tooling need
 no device.
 
-## Quickstart
+## Quickstart (Python API)
+
+The same loop as functions, for when you'd rather script than shell:
 
 ```python
 import wendle
