@@ -10,34 +10,29 @@ plain Python) between replayed steps.
 
 ## The loop
 
-wendle is one workflow with four verbs, not four tools. You drive the whole thing from the
-command line — no Python file required until you want custom logic.
+Everything runs from the command line against one `phone.json`. You don't write Python until
+you want custom logic.
 
 ```bash
-# 1. RECORD — walk the app by hand once; wendle saves a navigable map.
+# Walk the app by hand once; save the map.
 wendle record --out phone.json --duration 90
 
-# 2. LOOK — list the screens it captured, by id and namespace (no grepping JSON).
+# List the screens it captured, by id and namespace.
 wendle nodes phone.json
 
-# 3. REPLAY / NAVIGATE — re-enact the walk, or route straight to any screen and verify arrival.
+# Re-enact the walk, or route straight to one screen and verify arrival.
 wendle replay phone.json
 wendle navigate phone.json --to <node-id>
 
-# 4. DRIVE IT YOUR WAY — generate one editable Python file: named go_to_<screen>() helpers,
-#    the map wired in, a __main__ that runs. This is the single place you add custom logic.
+# Generate an editable Python driver: named go_to_<screen>() helpers, the map wired in,
+# a runnable __main__. Edit this when you want to drive the app your own way.
 wendle render phone.json --target python -o drive.py
 python drive.py
 ```
 
-You only reach for Python when step 4 isn't enough — to add a **hook** (run your own code at
-a verified point between steps: a Frida read, an LLM call, a reroute). Hooks live in one file
-and plug into the same replay you already ran: `wendle replay phone.json --hooks my_hooks.py`.
-See [Hooks](#hooks).
-
-That's the mental model: **record → look → replay/navigate → (optionally) hook.** Each verb
-reads the same `phone.json`; nothing is a separate tool. The Python API below is the same
-verbs as functions, for when you'd rather script than shell.
+For logic that has to run mid-replay — a Frida read, an LLM call, a reroute — write a
+[hook](#hooks) and pass it in: `wendle replay phone.json --hooks my_hooks.py`. The Python API
+below covers the same verbs if you'd rather call functions.
 
 ## Install
 
@@ -50,8 +45,6 @@ imported lazily, only when you construct a real driver, so tests and offline too
 no device.
 
 ## Quickstart (Python API)
-
-The same loop as functions, for when you'd rather script than shell:
 
 ```python
 import wendle
